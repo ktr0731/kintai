@@ -1,12 +1,12 @@
 package main
 
 import (
-	"errors"
-	"fmt"
+	"context"
 	"log"
 	"time"
 
 	"github.com/gedex/go-toggl/toggl"
+	"github.com/skratchdot/open-golang/open"
 )
 
 type Client struct {
@@ -30,30 +30,53 @@ func NewClient(logger *log.Logger, ssid, apiToken string, duration time.Duration
 
 func (c *Client) Start() error {
 	c.logger.Println("start pouring...")
+
+	exitCh := createSigCh()
+
 	ch := time.Tick(c.duration)
-	for range ch {
-		ssid, err := GetSSID()
-		if err != nil {
-			msg := fmt.Sprintf("failed to get SSID: %s", err)
-			c.logger.Println(msg)
-			return errors.New(msg)
-		}
-		switch {
-		case c.isStartNewTimeEntry(ssid):
-			c.started = true
-			if err := c.startTimeEntry(); err != nil {
-				return err
+	for {
+		select {
+		case <-exitCh:
+			c.logger.Println("pouring finished")
+			return nil
+		case <-ch:
+			ssid, err := GetSSID()
+			if err != nil {
+				c.logger.Printf("failed to get SSID: %s", err)
+				continue
 			}
-			c.logger.Println("start new time entry")
-		case c.isEndOfTimeEntry(ssid):
-			c.started = false
-			if err := c.stopTimeEntry(); err != nil {
-				return err
+			switch {
+			case c.isStartNewTimeEntry(ssid):
+				c.started = true
+				if err := c.startTimeEntry(); err != nil {
+					return err
+				}
+				c.logger.Println("start new time entry")
+			case c.isEndOfTimeEntry(ssid):
+				ctx, cancel := context.WithCancel(context.Background())
+
+				closeCh := make(chan struct{})
+				srv, err := NewServer(c.logger, closeCh)
+				if err != nil {
+					return err
+				}
+				srv.Start(ctx)
+
+				open.Run("http://127.0.0.1:8080/report")
+
+				// stop server when report submitted
+				c.logger.Println("waiting for submitting report...")
+				<-closeCh
+				cancel()
+
+				c.started = false
+				if err := c.stopTimeEntry(); err != nil {
+					return err
+				}
+				c.logger.Println("stop time entry")
 			}
-			c.logger.Println("stop time entry")
 		}
 	}
-	c.logger.Println("pouring finished")
 	return nil
 }
 
