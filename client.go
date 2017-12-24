@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"net"
 	"time"
 
 	"github.com/jason0x43/go-toggl"
@@ -21,9 +22,8 @@ type Client struct {
 
 func NewClient(logger *log.Logger, ssid, apiToken string, duration time.Duration) *Client {
 	return &Client{
-		ssid:   ssid,
-		logger: logger,
-		// toggl:    NewMockTogglClient(apiToken),
+		ssid:     ssid,
+		logger:   logger,
 		toggl:    NewTogglClient(apiToken),
 		duration: duration,
 	}
@@ -83,16 +83,23 @@ func (c *Client) isStartNewTimeEntry(ssid string) bool {
 	if !(c.ssid == ssid && !c.started) {
 		return false
 	}
-	time.Sleep(15)
+	err := waitUntilReconnection()
+	if err != nil {
+		c.logger.Println(err)
+		return false
+	}
 	return true
 }
 
-// TODO: 時間差で終える
 func (c *Client) isEndOfTimeEntry(ssid string) bool {
 	if !(c.ssid != ssid && c.started) {
 		return false
 	}
-	time.Sleep(15)
+	err := waitUntilReconnection()
+	if err != nil {
+		c.logger.Println(err)
+		return false
+	}
 	return true
 }
 
@@ -111,4 +118,17 @@ func (c *Client) stopTimeEntry(report *Report) error {
 	_, err := c.toggl.Stop(*c.timeEntry, report)
 	c.timeEntry = nil
 	return err
+}
+
+func waitUntilReconnection() error {
+	for {
+		_, err := net.LookupHost("toggl.com")
+		if err == nil {
+			return nil
+		}
+		if _, ok := err.(*net.DNSError); !ok {
+			return err
+		}
+	}
+	return nil
 }
