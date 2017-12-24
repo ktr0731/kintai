@@ -5,7 +5,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/gedex/go-toggl/toggl"
+	"github.com/jason0x43/go-toggl"
 	"github.com/skratchdot/open-golang/open"
 )
 
@@ -21,9 +21,10 @@ type Client struct {
 
 func NewClient(logger *log.Logger, ssid, apiToken string, duration time.Duration) *Client {
 	return &Client{
-		ssid:     ssid,
-		logger:   logger,
-		toggl:    NewMockTogglClient(apiToken),
+		ssid:   ssid,
+		logger: logger,
+		// toggl:    NewMockTogglClient(apiToken),
+		toggl:    NewTogglClient(apiToken),
 		duration: duration,
 	}
 }
@@ -51,11 +52,10 @@ func (c *Client) Start() error {
 				if err := c.startTimeEntry(); err != nil {
 					return err
 				}
-				c.logger.Println("start new time entry")
 			case c.isEndOfTimeEntry(ssid):
 				ctx, cancel := context.WithCancel(context.Background())
 
-				closeCh := make(chan struct{})
+				closeCh := make(chan *Report)
 				srv, err := NewServer(c.logger, closeCh)
 				if err != nil {
 					return err
@@ -66,14 +66,13 @@ func (c *Client) Start() error {
 
 				// stop server when report submitted
 				c.logger.Println("waiting for submitting report...")
-				<-closeCh
+				report := <-closeCh
 				cancel()
 
 				c.started = false
-				if err := c.stopTimeEntry(); err != nil {
+				if err := c.stopTimeEntry(report); err != nil {
 					return err
 				}
-				c.logger.Println("stop time entry")
 			}
 		}
 	}
@@ -81,29 +80,35 @@ func (c *Client) Start() error {
 }
 
 func (c *Client) isStartNewTimeEntry(ssid string) bool {
-	return c.ssid == ssid && !c.started
+	if !(c.ssid == ssid && !c.started) {
+		return false
+	}
+	time.Sleep(15)
+	return true
 }
 
 // TODO: 時間差で終える
 func (c *Client) isEndOfTimeEntry(ssid string) bool {
-	return c.ssid != ssid && c.started
+	if !(c.ssid != ssid && c.started) {
+		return false
+	}
+	time.Sleep(15)
+	return true
 }
 
 func (c *Client) startTimeEntry() error {
-	te, err := c.toggl.Create(&toggl.TimeEntry{})
+	c.logger.Println("start new time entry")
+	te, err := c.toggl.Start()
 	if err != nil {
 		return err
 	}
-	te, err = c.toggl.Start(te)
-	if err != nil {
-		return err
-	}
-	c.timeEntry = te
+	c.timeEntry = &te
 	return nil
 }
 
-func (c *Client) stopTimeEntry() error {
-	_, err := c.toggl.Stop(c.timeEntry.ID)
+func (c *Client) stopTimeEntry(report *Report) error {
+	c.logger.Println("stop time entry")
+	_, err := c.toggl.Stop(*c.timeEntry, report)
 	c.timeEntry = nil
 	return err
 }

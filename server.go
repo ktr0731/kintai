@@ -9,10 +9,10 @@ import (
 type Server struct {
 	srv     *http.Server
 	logger  *log.Logger
-	closeCh chan<- struct{}
+	closeCh chan<- *Report
 }
 
-func NewServer(logger *log.Logger, closeCh chan<- struct{}) (*Server, error) {
+func NewServer(logger *log.Logger, closeCh chan<- *Report) (*Server, error) {
 	mux := http.NewServeMux()
 	h, err := newHandler(closeCh)
 	if err != nil {
@@ -59,6 +59,6 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	s.closeCh <- struct{}{}
+	s.closeCh <- nil
 	return nil
 }
